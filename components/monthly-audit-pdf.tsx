@@ -89,6 +89,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: "Helvetica-Bold",
   },
+  summaryValueSm: {
+    fontSize: 14,
+    fontFamily: "Helvetica-Bold",
+  },
   coverFooter: {
     position: "absolute",
     bottom: 32,
@@ -203,6 +207,95 @@ function formatCurrency(value: number): string {
   return value < 0 ? `-$${abs}` : `$${abs}`;
 }
 
+interface TradeMetrics {
+  winners: number;
+  losers: number;
+  profitFactor: number | null;
+  expectancy: number;
+  maxConsecWins: number;
+  maxConsecLosses: number;
+  avgConsecWins: number;
+  avgConsecLosses: number;
+}
+
+function calcMetrics(trades: AuditTrade[]): TradeMetrics {
+  const sorted = [...trades].sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    return a.trade_number - b.trade_number;
+  });
+
+  const winners = sorted.filter((t) => t.result !== "BE" && Number(t.pnl) > 0).length;
+  const losers = sorted.filter((t) => t.result !== "BE" && Number(t.pnl) < 0).length;
+
+  const grossProfit = sorted
+    .filter((t) => t.result !== "BE" && Number(t.pnl) > 0)
+    .reduce((sum, t) => sum + Number(t.pnl), 0);
+
+  const grossLoss = Math.abs(
+    sorted
+      .filter((t) => t.result !== "BE" && Number(t.pnl) < 0)
+      .reduce((sum, t) => sum + Number(t.pnl), 0)
+  );
+
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : null;
+
+  const expectancy =
+    sorted.length > 0
+      ? sorted.reduce((sum, t) => sum + Number(t.pnl), 0) / sorted.length
+      : 0;
+
+  // Rachas: si el resultado es BE, no corta ni suma racha (aunque pnl no sea 0)
+  let currentWinStreak = 0;
+  let currentLossStreak = 0;
+  const winStreaks: number[] = [];
+  const lossStreaks: number[] = [];
+
+  for (const t of sorted) {
+    if (t.result === "BE") continue;
+    const pnl = Number(t.pnl);
+    if (pnl > 0) {
+      currentWinStreak++;
+      if (currentLossStreak > 0) {
+        lossStreaks.push(currentLossStreak);
+        currentLossStreak = 0;
+      }
+    } else if (pnl < 0) {
+      currentLossStreak++;
+      if (currentWinStreak > 0) {
+        winStreaks.push(currentWinStreak);
+        currentWinStreak = 0;
+      }
+    }
+    // pnl === 0: neutral, no modifica ni corta la racha actual
+  }
+  if (currentWinStreak > 0) winStreaks.push(currentWinStreak);
+  if (currentLossStreak > 0) lossStreaks.push(currentLossStreak);
+
+  const maxConsecWins = winStreaks.length > 0 ? Math.max(...winStreaks) : 0;
+  const maxConsecLosses =
+    lossStreaks.length > 0 ? Math.max(...lossStreaks) : 0;
+
+  const avgConsecWins =
+    winStreaks.length > 0
+      ? winStreaks.reduce((a, b) => a + b, 0) / winStreaks.length
+      : 0;
+  const avgConsecLosses =
+    lossStreaks.length > 0
+      ? lossStreaks.reduce((a, b) => a + b, 0) / lossStreaks.length
+      : 0;
+
+  return {
+    winners,
+    losers,
+    profitFactor,
+    expectancy,
+    maxConsecWins,
+    maxConsecLosses,
+    avgConsecWins,
+    avgConsecLosses,
+  };
+}
+
 interface Props {
   trades: AuditTrade[];
   account: FundingAccount;
@@ -220,6 +313,17 @@ export function MonthlyAuditPDF({ trades, account, dailyNotes }: Props) {
     (t) => t.result === "Profit" || t.result === "Stop Loss - Positivo"
   ).length;
   const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0;
+
+  const {
+    winners,
+    losers,
+    profitFactor,
+    expectancy,
+    maxConsecWins,
+    maxConsecLosses,
+    avgConsecWins,
+    avgConsecLosses,
+  } = calcMetrics(trades);
 
   const generatedAt = format(new Date(), "dd/MM/yyyy HH:mm");
 
@@ -273,6 +377,79 @@ export function MonthlyAuditPDF({ trades, account, dailyNotes }: Props) {
               ]}
             >
               {formatCurrency(Number(account.initial_balance) + totalPnl)}
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Fila 2: Winners / Losers / Profit Factor / Expectancy ───────── */}
+        <View style={[styles.summaryGrid, { marginBottom: 12 }]}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Winners</Text>
+            <Text style={[styles.summaryValueSm, { color: GREEN }]}>
+              {winners}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Losers</Text>
+            <Text style={[styles.summaryValueSm, { color: RED }]}>
+              {losers}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Profit Factor</Text>
+            <Text
+              style={[
+                styles.summaryValueSm,
+                {
+                  color:
+                    profitFactor === null
+                      ? GRAY
+                      : profitFactor >= 1
+                      ? GREEN
+                      : RED,
+                },
+              ]}
+            >
+              {profitFactor === null ? "N/A" : profitFactor.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Expectancy</Text>
+            <Text
+              style={[
+                styles.summaryValueSm,
+                { color: expectancy >= 0 ? GREEN : RED },
+              ]}
+            >
+              {formatCurrency(expectancy)}
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Fila 3: Rachas consecutivas ─────────────────────────────────── */}
+        <View style={[styles.summaryGrid, { marginBottom: 28 }]}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Max. Consec. Wins</Text>
+            <Text style={[styles.summaryValueSm, { color: GREEN }]}>
+              {maxConsecWins}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Avg. Consec. Wins</Text>
+            <Text style={[styles.summaryValueSm, { color: GREEN }]}>
+              {avgConsecWins.toFixed(1)}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Max. Consec. Losses</Text>
+            <Text style={[styles.summaryValueSm, { color: RED }]}>
+              {maxConsecLosses}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Avg. Consec. Losses</Text>
+            <Text style={[styles.summaryValueSm, { color: RED }]}>
+              {avgConsecLosses.toFixed(1)}
             </Text>
           </View>
         </View>
