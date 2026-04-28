@@ -4,6 +4,30 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   const supabase = await createServerClient();
   const { searchParams } = new URL(request.url);
+
+  const startDateParam = searchParams.get("startDate");
+  const endDateParam = searchParams.get("endDate");
+
+  // Date-range mode: used by dashboard when switching accounts
+  if (startDateParam) {
+    let query = supabase
+      .from("trades")
+      .select("*")
+      .gte("date", startDateParam)
+      .order("date", { ascending: true });
+
+    if (endDateParam) {
+      query = query.lte("date", endDateParam);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json(data);
+  }
+
+  // Month mode: used by calendar
   const year = parseInt(searchParams.get("year") || "0");
   const month = parseInt(searchParams.get("month") || "0");
 

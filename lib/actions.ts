@@ -93,6 +93,8 @@ export async function deleteTrade(tradeId: string) {
   revalidatePath("/dashboard");
 }
 
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+
 export async function uploadTradePhoto(formData: FormData) {
   const supabase = await createServerClient();
 
@@ -103,6 +105,13 @@ export async function uploadTradePhoto(formData: FormData) {
 
   const file = formData.get("file") as File;
   if (!file) throw new Error("No file provided");
+
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Solo se permiten archivos de imagen.");
+  }
+  if (file.size > MAX_IMAGE_SIZE) {
+    throw new Error("La imagen no puede superar 10 MB.");
+  }
 
   const fileExt = file.name.split(".").pop();
   const fileName = `${user.id}/${Date.now()}.${fileExt}`;
@@ -147,6 +156,27 @@ export async function getAllTrades() {
     .select("*")
     .order("date", { ascending: true });
 
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getTradesForAccountPeriod(
+  startDate: string,
+  endDate: string | null
+) {
+  const supabase = await createServerClient();
+
+  let query = supabase
+    .from("trades")
+    .select("*")
+    .gte("date", startDate)
+    .order("date", { ascending: true });
+
+  if (endDate) {
+    query = query.lte("date", endDate);
+  }
+
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
   return data;
 }

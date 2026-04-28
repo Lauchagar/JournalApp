@@ -1,6 +1,15 @@
 import { createClient } from "@/lib/supabase";
 
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+
 export async function uploadImageToSupabase(file: File | Blob): Promise<string> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Solo se permiten archivos de imagen.");
+  }
+  if (file.size > MAX_IMAGE_SIZE) {
+    throw new Error("La imagen no puede superar 10 MB.");
+  }
+
   const supabase = createClient();
 
   const ext = file instanceof File ? file.name.split(".").pop() : "png";

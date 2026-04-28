@@ -58,6 +58,7 @@ export function NotionEditor({
       Image.configure({
         HTMLAttributes: {
           class: "rounded-lg max-w-full my-2",
+          loading: "lazy",
         },
       }),
       Link.configure({
